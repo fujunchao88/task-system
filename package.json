@@ -1,0 +1,20 @@
+{
+  "name": "asynctask_script",
+  "version": "1.0.0",
+  "description": "异步任务脚本系统是一个可以执行异步任务的脚本引擎。通过这个系统，开发者可以预先编辑好任务脚本，当要执行某任务时，提供该任务所需的参数，系统会按参数，按调度算法执行对应的任务，并把任务结果保存起来供后续查阅。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "async",
+    "script"
+  ],
+  "author": "Lee",
+  "license": "ISC",
+  "dependencies": {
+    "agenda": "^1.0.3",
+    "request": "^2.85.0",
+    "vm2": "^3.5.2"
+  }
+}
