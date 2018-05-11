@@ -5,7 +5,7 @@ let timeout = 5000
 
 const settings = {
 	get agendaMongoUrl() {
-		return `mongodb://${dbHost}/${dbName}`
+		return `mongodb://${dbhost}/${dbname}`
 	},
 	get dbName() {
 		return dbname

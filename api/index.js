@@ -8,25 +8,25 @@ const Script = mongoose.model('Script')
 const Task = mongoose.model('Task')
 
 app.get('/script', async (ctx, next) => {
-	const Script = new Script()
-	Script.find((err, scripts) => {
-		if (err) {
-			throw new Error('failed to query collection script')
-		}
+	try {
+		const Script = new Script()
+		const scripts = await Script.find()
 		ctx.body = scripts
-	})
-	await next()
+		await next()
+	} catch (err) {
+		console.error(err.message)
+	}
 })
 
 app.post('/script', async (ctx, next) => {
-	const script = new Script(ctx.request.body)
-	script.save((err, scripts) => {
-		if (err) {
-			throw new Error('failed to post script')
-		}
+	try {
+		const script = new Script(ctx.request.body)
+		const scripts = await script.save()
 		ctx.body = scripts
-	})
-	await next()
+		await next()
+	} catch (err) {
+		console.error(err.message)
+	}
 })
 
 app.put('/script', async (ctx, next) => {

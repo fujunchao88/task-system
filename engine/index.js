@@ -1,21 +1,29 @@
 const fs = require('fs')
 const _ = require('lodash')
 const Agenda = require('agenda')
-const qs = require('querystring')
-const _ = require('lodash')
 const rp = require('request-promise')
-const MyStream = require('json2csv-stream')
+const moment = require('moment')
+const Excel = require('exceljs')
+const jsb = require('json-schema-builder')
+const Readable = require('stream').Readable
 
 const config = require('../config')
 const settings = require('../setting')
-const db = require('./util/mongodb/index')
+const util_mongodb = require('./util/mongodb/index')
 
-const type = config.type
+let schema = {}
 const connection_url = settings.agendaMongoUrl
 const dbName = settings.dbName
+const readable = new Stream()
 const agenda = new Agenda({
 	db: { address: connection_url, collection: dbName }
 })
+const reuslt_type = new Map([
+	['csv', 0],
+	['excel', 1],
+	['pdf', 2],
+	['raw', 3]
+])
 
 class engine {
 	constructor({ commonParam: { time, time_period, export_format } }, typeValue, FormatValue, periodValue, notificationValue, alertValue ) {
@@ -26,30 +34,32 @@ class engine {
 		}
 
 		this.typeValue = typeValue
-		this.formatTypeValue = formatTypeValue
+		this.FormatValue = FormatValue
 		this.periodValue = periodValue
-		this.notificationTypeValue = notificationTypeValue
-		this.alertVTypeValue = alertVTypeValue
+		this.notificationValue = notificationValue
+		this.alertValue = alertValue
 	}
 
 	paramDeclare(name, type) {
-		return this.name.constructor = type
+		const result = jsb.type(type).json()
+		schema[`${name}`] = result
 	}
 
 	paramRange(name, range) {
-		if (name instanceof String) {
-			(name.length >= _.head(range)) && (name.length <= _.last(range))
-		}
-		if (name instanceof Number) {
-			(name.length >= _.head(range)) && (name.length <= _.last(range))
-		}
-		if (name instanceof Date) {
-			(name >= _.head(range)) && (name <= _.last(range))
+		if (typeof range[0] === 'number') {
+			if (schema[`${name}`].type === 'number') {
+				schema[`${name}`] = jsb.type('number').maximum(range[1]).exclusiveMaximum(true).json()
+			}
+			if (schema[`${name}`].type === 'string') {
+				schema[`${name}`] = jsb.type('string').minLength(range[0]).maxLength(range[1]).json()
+			}
+		} else {
+			schema[`${name}`] = jsb.object().property(_.keys(range)[0], _.values(range)[0]).json()
 		}
 	}
 
-	paramOptional(name, true) {
-		if (true) {
+	paramOptional(name, isOPtional = true) {
+		if (isOPtional) {
 			return this.name
 		}
 		return {}
@@ -59,25 +69,44 @@ class engine {
 		return this.name = name
 	}
 
-	async queryTable(type) {
+	async queryTable(key) {
 		const options = {
-			url: type === 'tracks' ? config.tracks.url:config.millege.url,
+			url: key === 'tracks' ? config.tracks.url : config.millege.url,
 			method: 'GET',
-			qs: type === 'tracks' ? config.tracks.params:config.millege.params,
+			qs: key === 'tracks' ? config.tracks.params : config.millege.params,
 			resolveWithFullResponse: true,
 		}
-		const { statusCode, body } = await rp(options)
-		return JSON.parse(body)
+		const { body } = await rp(options)
+		return body
 	}
 
-	save(key, content, format) {
+	// content: [
+	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
+	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
+	// ]
+	async save(key, content, format) {
+		const db = util_mongodb.connection()
+		let data
 		if (format === 'csv') {
-			try {
-				const json_file = fs.writeFileSync('../public/json_file.json', content, 'utf8')
-				const 
-			} catch (err) {
-				console.error(err)
+			const wb = new Excel.Workbook()
+			const ws = wb.addWorksheet('My Sheet')
+			const header_arr = _.keys(content[0])
+			for (let i = 0; i < header_arr.length; i += 1) {
+				ws.getColumn(i).header = header_arr[i]
 			}
+			for(let i = 0; i < content.length; i += 1) {
+				const value_arr = _.values(content[i])
+				ws.addRows(value_arr)
+			}
+			const now_str = moment().format('YYYYMMDD_HHmm')
+			await wb.csv.writeFile(`../public/${now_str}.csv`)
+			const readable = fs.createReadStream(`../public/${now_str}.csv`)
+			data = db.grid_read(readable)
+		}
+		const rs = {
+			type: reuslt_type.get(format),
+			data,
+			task_rumtime_id: ''
 		}
 	}
 
@@ -105,3 +134,5 @@ class engine {
 
 	}
 }
+
+module.exports = engine

@@ -6,22 +6,14 @@ const TaskSchema = new mongoose.Schema({
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'Script'
 	},
-    owner_id: String,
-    name: String,
-	create_time: {
-		type: Date,
-		default: Date.now
-    },
-    edit_time: {
-        type: Date,
-        default: null
-    },
+	owner_id: String,
+	name: String,
 	params: Object
 }, {
 	timestamps: { 
-        createdAt: 'create_time',
-        updatedAt: 'edit_time',
-    }
+		createdAt: 'create_time',
+		updatedAt: 'edit_time',
+	}
 })
 
 mongoose.model('Task', TaskSchema)

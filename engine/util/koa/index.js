@@ -9,7 +9,6 @@ const KoaApp = () => {
 	app.use(logger())
 	app.use(async (ctx, next) => next()
 		.catch(err => {
-			console.dir(err)
 			ctx.body = String(err)
 			ctx.status = err.status || 500
 		})
@@ -23,6 +22,4 @@ const KoaApp = () => {
 	return {app, router}
 }
 
-const isValidDate = date => Object.prototype.toString.call(date) === '[object Date]' && !isNaN(date.getTime())
-
-export {KoaApp, isValidDate}
+export { KoaApp }
