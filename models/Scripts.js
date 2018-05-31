@@ -1,5 +1,4 @@
 const mongoose = require('mongoose')
-const moment = require('moment')
 
 const ScriptSchema = new mongoose.Schema({
 	owner_id: String,

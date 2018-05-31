@@ -1,38 +1,41 @@
 const fs = require('fs')
 const _ = require('lodash')
-const Agenda = require('agenda')
 const rp = require('request-promise')
 const moment = require('moment')
 const Excel = require('exceljs')
 const jsb = require('json-schema-builder')
-const Readable = require('stream').Readable
+const OSS = require('ali-oss').Wrapper
 
 const config = require('../config')
-const settings = require('../setting')
 const util_mongodb = require('./util/mongodb/index')
 
 let schema = {}
-const connection_url = settings.agendaMongoUrl
-const dbName = settings.dbName
-const readable = new Stream()
-const agenda = new Agenda({
-	db: { address: connection_url, collection: dbName }
+const client = new OSS({
+	region: config.oss.options.region,
+	accessKeyId: config.oss.options.accessKeyId,
+	accessKeySecret: config.oss.options.accessKeySecret,
+	bucket: config.oss.options.bucket
 })
-const reuslt_type = new Map([
+const result_type = new Map([
 	['csv', 0],
 	['excel', 1],
 	['pdf', 2],
 	['raw', 3]
 ])
+const callback_type = new Map([
+	['overspeed', '/alert/overspeed'],
+	['long_stay', '/alert/long_stay']
+])
 
-class engine {
-	constructor({ commonParam: { time, time_period, export_format } }, typeValue, FormatValue, periodValue, notificationValue, alertValue ) {
+class Engine {
+	constructor({ commonParam: { time, time_period, export_format } }, typeValue, FormatValue, periodValue, notificationValue, alertValue, task_id ) {
 		this.commonParam = {
 			time,
 			time_period,
 			export_format,
 		}
 
+		this.task_id = task_id
 		this.typeValue = typeValue
 		this.FormatValue = FormatValue
 		this.periodValue = periodValue
@@ -73,66 +76,108 @@ class engine {
 		const options = {
 			url: key === 'tracks' ? config.tracks.url : config.millege.url,
 			method: 'GET',
-			qs: key === 'tracks' ? config.tracks.params : config.millege.params,
+			// qs: key === 'tracks' ? config.tracks.params : config.millege.params,
+			json: true,
 			resolveWithFullResponse: true,
 		}
 		const { body } = await rp(options)
 		return body
 	}
 
+	// content = queryTable
 	// content: [
 	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
 	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
 	// ]
 	async save(key, content, format) {
-		const db = util_mongodb.connection()
+		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
 		let data
 		if (format === 'csv') {
+			const now_str = moment().format('YYYYMMDD_HHmmss')
+			const writable = fs.createWriteStream(`../public/${now_str}.csv`)
 			const wb = new Excel.Workbook()
 			const ws = wb.addWorksheet('My Sheet')
 			const header_arr = _.keys(content[0])
-			for (let i = 0; i < header_arr.length; i += 1) {
-				ws.getColumn(i).header = header_arr[i]
-			}
+			ws.addRow(header_arr).commit()
 			for(let i = 0; i < content.length; i += 1) {
 				const value_arr = _.values(content[i])
-				ws.addRows(value_arr)
+				ws.addRow(value_arr).commit()
 			}
-			const now_str = moment().format('YYYYMMDD_HHmm')
-			await wb.csv.writeFile(`../public/${now_str}.csv`)
-			const readable = fs.createReadStream(`../public/${now_str}.csv`)
-			data = db.grid_read(readable)
+			await wb.csv.write(writable)
+			const result = await client.put(`task_system/${now_str}.csv`, `../public/${now_str}.csv`)
+			data = result.name
 		}
 		const rs = {
-			type: reuslt_type.get(format),
+			type: result_type.get(format),
 			data,
-			task_rumtime_id: ''
+			create_time: Date.now(),
+			task_id: this.task_id
 		}
+		await util_mongodb.saveTo_db(db, config.mongodb.result_tb, rs)
+		db.emit('close')
 	}
 
-	subscribe(key, ...params) {
-
+	async subscribe(key, ...params) { // query为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
+		// setTimeout(async () => {
+		const options = {
+			url: 'http://localhost:3000/callback/overspeed',
+			method: 'GET',
+			json: true,
+			resolveWithFullResponse: true
+		}
+		const result = await rp(options)
+		return result.body
+		// }, 5000)
 	}
 
-	get(key) {
-
+	async set(key, value) {
+		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+		const rs = {
+			task_id: this.task_id,
+			key,
+			value
+		}
+		util_mongodb.saveTo_db(db, config.mongodb.scratch_tb, rs)
+		db.emit('close')
 	}
 
-	append(key, data) {
-
+	async get(key) {
+		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+		util_mongodb.getValueByKey(db, config.mongodb.scratch_tb, key, this.task_id)
+		db.emit('close')
 	}
 
-	del(key) {
+	async append(key, data) {
+		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+		const value = await util_mongodb.getValueByKey(db, config.mongodb.result_tb, key, this.task_id)
+		await db.collection(config.mongodb.scratch_tb).findOneAndUpdate({ key, task_id: this.task_id }, { $set: {value: data + value }})
+		db.emit('close')
+	}
 
+	async del(key) {
+		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+		await util_mongodb.removeByKey(db ,config.mongodb.scratch_tb, key, this.task_id)
+		db.emit('close')
 	}
 
 	log(...args) {
-
+		console.log(args)
 	}
 
-	callback() {
-
+	async callback(cb_key, data) {
+		const options = {
+			url: `http://localhost:3000${callback_type.get(cb_key)}`,
+			method: 'POST',
+			json: true,
+			resolveWithFullResponse: true,
+			body: {
+				vehicle_ids: data.vehicle_ids || '',
+				speed: String(data.speed) || '120'
+			}
+		}
+		const result = await rp(options)
+		return result.body
 	}
 }
 
-module.exports = engine
+module.exports = Engine

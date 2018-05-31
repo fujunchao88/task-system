@@ -1,29 +1,40 @@
-// const mongoose = require('mongoose')
+const _ = require('lodash')
 const MongoClient = require('mongodb').MongoClient
 const promifisy = require('util').promisify
 const GridStore = require('mongodb').GridStore
 const streamToBuffer = promifisy(require('stream-to-buffer'))
-const config = require('../../../config')
 
-const connection = async () => {
-	// await mongoose.connect(`mongodb://${config.mongodb.dbHost}/${config.mongodb.dbName}`)
-	await MongoClient.connect(`mongodb://${config.mongodb.dbHost}:${config.mongodb.dbPort}/${config.mongodb.dbName}`)
+const connection = async (host, port, dbname) => {
+	const client = await MongoClient.connect(`mongodb://${host}:${port}`)
+	const db = client.db(dbname)
+	return db
 }
 
-const grid_read = async (file_stream) => {
-	const db = await connection()
-	const grid_open = await new GridStore(db, 'r').open()
-	const file_buff = await streamToBuffer(file_stream)
-	await grid_open.read(file_buff)
+const saveTo_db = async (db, table, rs) => {
+	await db.collection(table).insertOne(rs)
 }
 
-const save = async (rs) => {
-	const db = await connection()
-	const collection = db.collection('result')
-	await db.insert(collection)
+const getValueByKey = async (db, table, key, task_id) => {
+	const data = await db.collection(table).findOne({ key, task_id }, { projection: { value: 1, _id: 0 }})
+	return data.value
+}
+
+const removeByKey = async (db, table, key, task_id) => {
+	await db.collection(table).findOneAndDelete({ key, task_id })
+}
+
+const findLatest = async (db, table) => {
+	const task = await db.collection(table).findOne({}, {
+		limit: 1,
+		sort: [['create_time', -1]],
+	})
+	return task._id
 }
 
 module.exports = {
 	connection,
-	grid_read
+	saveTo_db,
+	getValueByKey,
+	removeByKey,
+	findLatest
 }
