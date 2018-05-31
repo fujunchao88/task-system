@@ -1,43 +1,31 @@
 const Ajv = require('ajv')
 
-const engine = require('../engine/index.js')
+const util_mongodb = require('../engine/util/mongodb')
+const Engine = require('../engine/index.js')
+const config = require('../config')
 
 const ajv = new Ajv()
-const { export_format } = engine.CommonParam
 const schema =  {
 	'type': 'object',
-	'title': 'Comment',
 	'properties': {
-		'tid': {
+		'vehicle_ids': {
 			'type': 'string'
 		},
-		'last_locations': {
-			'type': 'object',
-			'properties': {
-				'lat': {
-					'type': 'number'
-				},
-				'lng': {
-					'type': 'number'
-				}
-			}
+		'timestamp': {
+			'type': 'number'
 		},
-		'present_locations': {
-			'type': 'object',
-			'properties': {
-				'lat': {
-					'type': 'number'
-				},
-				'lng': {
-					'type': 'number'
-				}
-			}
+		'lng': {
+			'type': 'number',
+		},
+		'lat': {
+			'type': 'number',
 		}
 	},
 	'required': [
-		'tid',
-		'last_locations',
-		'present_locations'
+		'vehicle_ids',
+		'timestamp',
+		'lat',
+		'lng'
 	]
 }
 
@@ -46,20 +34,24 @@ function onParamDeclare() {
 }
 
 // 指定任务逻辑
-function onTaskExec() {
-	const format = engine.paramGet(export_format)
-	const scipt_type = engine.paramGet('script_type')
-	const content = engine.queryTable(scipt_type)
-	const valid = ajv.validate(schema, content)
-	engine.save(fleetId, content, format)
+const onTaskExec = async () => {
+	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+	const task_id = await util_mongodb.findLatest(db, config.mongodb.task_tb)
+	const engine = new Engine({ commonParam: { time: 123, time_period: 7, export_format: 0 }}, 'String', 'csv', 'Everyweek', 'Push', 'OverSpeed', task_id)
+	const format = engine.FormatValue
+	const content = await engine.queryTable('tracks')
+	console.log(`content: ${JSON.stringify(content)}`)
+	for (let i = 0; i < content.length; i += 1) {
+		const valid = ajv.validate(schema, content[i])
+		if (!valid) throw new Error('invalid data schema')
+	}
+	await engine.save('script_type', content, format)
 }
 
 // 处理订阅的数据回调
-function onTaskData(event) {
-	const fleetId = engine.paramGet('Fleet Id')
-	if (event.subscribeKey === 'geo' && event.data > 120) {
-		engine.alert(engine.AlertType.OverSpeed, event.data, fleetId)
-	} else if (event.subscribeKey === 'fence_event') {
-		engine.alert(engine.AlertType.FenceEvent, event.data, fleetId)
-	}
-}
+// function onTaskData(event) {
+	
+// }
+
+onTaskExec()
+
