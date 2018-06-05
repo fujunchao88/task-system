@@ -1,57 +1,20 @@
-const Ajv = require('ajv')
-
-const util_mongodb = require('../engine/util/mongodb')
-const Engine = require('../engine/index.js')
-const config = require('../config')
-
-const ajv = new Ajv()
-const schema =  {
-	'type': 'object',
-	'properties': {
-		'vehicle_ids': {
-			'type': 'string'
-		},
-		'timestamp': {
-			'type': 'number'
-		},
-		'lng': {
-			'type': 'number',
-		},
-		'lat': {
-			'type': 'number',
-		}
-	},
-	'required': [
-		'vehicle_ids',
-		'timestamp',
-		'lat',
-		'lng'
-	]
-}
+/* eslint-disable no-undef */
+/* eslint-disable no-console */
 
 function onParamDeclare() {
-	return schema
+	return config.export_schema
 }
 
 // 指定任务逻辑
 const onTaskExec = async () => {
-	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
-	const task_id = await util_mongodb.findLatest(db, config.mongodb.task_tb)
-	const engine = new Engine({ commonParam: { time: 123, time_period: 7, export_format: 0 }}, 'String', 'csv', 'Everyweek', 'Push', 'OverSpeed', task_id)
-	const format = engine.FormatValue
+	engine.log('Export_excel: in onTaskExec')
 	const content = await engine.queryTable('tracks')
-	console.log(`content: ${JSON.stringify(content)}`)
-	for (let i = 0; i < content.length; i += 1) {
-		const valid = ajv.validate(schema, content[i])
-		if (!valid) throw new Error('invalid data schema')
-	}
+	engine.log(`content: ${JSON.stringify(content)}`)
 	await engine.save('script_type', content, format)
 }
 
-// 处理订阅的数据回调
-// function onTaskData(event) {
-	
-// }
-
-onTaskExec()
+module.exports = {
+	onParamDeclare,
+	onTaskExec
+}
 
