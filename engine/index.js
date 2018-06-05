@@ -16,31 +16,20 @@ const client = new OSS({
 	accessKeySecret: config.oss.options.accessKeySecret,
 	bucket: config.oss.options.bucket
 })
-const result_type = new Map([
-	['csv', 0],
-	['excel', 1],
-	['pdf', 2],
-	['raw', 3]
-])
+// const result_type = new Map([
+// 	['csv', 0],
+// 	['excel', 1],
+// 	['pdf', 2],
+// 	['raw', 3]
+// ])
 const callback_type = new Map([
 	['overspeed', '/alert/overspeed'],
 	['long_stay', '/alert/long_stay']
 ])
 
 class Engine {
-	constructor({ commonParam: { time, time_period, export_format } }, typeValue, FormatValue, periodValue, notificationValue, alertValue, task_id ) {
-		this.commonParam = {
-			time,
-			time_period,
-			export_format,
-		}
-
+	constructor(task_id) {
 		this.task_id = task_id
-		this.typeValue = typeValue
-		this.FormatValue = FormatValue
-		this.periodValue = periodValue
-		this.notificationValue = notificationValue
-		this.alertValue = alertValue
 	}
 
 	paramDeclare(name, type) {
@@ -86,13 +75,13 @@ class Engine {
 
 	// content = queryTable
 	// content: [
-	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
-	// 	{ tid: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
+	// 	{ vehicle_ids: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
+	// 	{ vehicle_ids: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
 	// ]
 	async save(key, content, format) {
 		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
 		let data
-		if (format === 'csv') {
+		if (format === 0) {
 			const now_str = moment().format('YYYYMMDD_HHmmss')
 			const writable = fs.createWriteStream(`../public/${now_str}.csv`)
 			const wb = new Excel.Workbook()
@@ -108,7 +97,8 @@ class Engine {
 			data = result.name
 		}
 		const rs = {
-			type: result_type.get(format),
+			type: format,
+			// type: result_type.get(format),
 			data,
 			create_time: Date.now(),
 			task_id: this.task_id
@@ -120,7 +110,7 @@ class Engine {
 	async subscribe(key, ...params) { // query为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
 		// setTimeout(async () => {
 		const options = {
-			url: 'http://localhost:3000/callback/overspeed',
+			url: 'http://localhost:3000/subcribe/overspeed',
 			method: 'GET',
 			json: true,
 			resolveWithFullResponse: true
@@ -166,13 +156,14 @@ class Engine {
 
 	async callback(cb_key, data) {
 		const options = {
-			url: `http://localhost:3000${callback_type.get(cb_key)}`,
+			url: `${config.callback.url}${callback_type.get(cb_key)}`,
 			method: 'POST',
 			json: true,
 			resolveWithFullResponse: true,
 			body: {
-				vehicle_ids: data.vehicle_ids || '',
-				speed: String(data.speed) || '120'
+				status: 200,
+				message: 'Operation is successful',
+				data
 			}
 		}
 		const result = await rp(options)

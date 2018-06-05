@@ -1,8 +1,6 @@
 const _ = require('lodash')
+const moment = require('moment')
 const MongoClient = require('mongodb').MongoClient
-const promifisy = require('util').promisify
-const GridStore = require('mongodb').GridStore
-const streamToBuffer = promifisy(require('stream-to-buffer'))
 
 const connection = async (host, port, dbname) => {
 	const client = await MongoClient.connect(`mongodb://${host}:${port}`)
@@ -31,10 +29,34 @@ const findLatest = async (db, table) => {
 	return task._id
 }
 
+const findTaskById = async (db, task_id) => {
+	const task = await db.collection('tasks').findOne({ _id: task_id })
+	return task
+}
+
+const queryByTime = async (db, table) => {
+	const arr = await db.collection(table).find({ time: { $lte: moment().unix() } }, { projection: { _id: 1, name: 1 }}).toArray()
+	return arr
+}
+
+const findScriptNameById = async (db, task) => {
+	const script = await db.collection('scripts').findOne({ _id: task.script_id })
+	return script.name
+}
+
+const getFormatByTaskId = async (db, task_id) => {
+	const task = await db.collection('tasks').findOne({ _id: task_id })
+	return task.params.formatValue
+}
+
 module.exports = {
 	connection,
 	saveTo_db,
 	getValueByKey,
 	removeByKey,
-	findLatest
+	findLatest,
+	queryByTime,
+	findScriptNameById,
+	getFormatByTaskId,
+	findTaskById
 }

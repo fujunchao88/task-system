@@ -7,6 +7,7 @@ const TaskSchema = new mongoose.Schema({
 	},
 	owner_id: String,
 	name: String,
+	time: Date,
 	params: Object
 }, {
 	timestamps: { 

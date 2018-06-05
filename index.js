@@ -13,6 +13,8 @@ mongoose.connect('mongodb://localhost/task_system', function(err, db) {
 
 require('./models/Scripts')
 require('./models/Tasks')
+require('./models/Scratchs')
+require('./models/Results')
 
 const router = require('./routes/index')
 const app = new Koa()

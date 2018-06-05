@@ -3,10 +3,9 @@ const config = {
 		dbHost: 'localhost',
 		dbPort: 27017,
 		dbName: 'task_system',
-		result_tb: 'result',
-		scratch_tb: 'scratch',
+		result_tb: 'results',
+		scratch_tb: 'scratchs',
 		task_tb: 'tasks',
-		runtime_tb: 'runtime'
 	},
 	agenda: {
 		MongoUrl: 'localhost:27017/task_system',
@@ -14,15 +13,12 @@ const config = {
 		definitions: ''
 	},
 	tracks: {
-		url: 'http://localhost:3000/tracks',
+		url: 'http://localhost:3000/export_tracks',
 		params: {},
 	},
 	millege: {
-		url: 'http://localhost:3000/millege',
+		url: 'http://localhost:3000/export_millege',
 		params: {},
-	},
-	csv: {
-		export_file: './public/csvFile.csv'
 	},
 	oss: {
 		options: {
@@ -31,6 +27,71 @@ const config = {
 			accessKeySecret: 'V0MYlgZCwXtolhemz70cfL0xZsLgFn',
 			bucket: 'task-system',
 		},
+	},
+	alert_schema: {
+		'type': 'object',
+		'properties': {
+			'script_id': { 'type': 'string'},
+			'owner_id': { 'type': 'string' },
+			'name': { 'type': 'string' },
+			'time': { 'type': 'number'},
+			'params': {
+				'type': 'object',
+				'properties': {
+					'speed': {
+						'type': 'number'
+					},
+					'typeValue': {
+						'type': 'number'
+					},
+					'notificationValue': {
+						'type': 'number'
+					},
+					'alertValue': {
+						'type': 'number'
+					},
+				}
+			}
+		},
+		'required': [
+			'script_id',
+			'owner_id',
+			'name',
+			'time',
+			'params'
+		]
+	},
+	export_schema: {
+		'type': 'object',
+		'properties': {
+			'script_id': { 'type': 'string'},
+			'owner_id': { 'type': 'string' },
+			'name': { 'type': 'string' },
+			'time': { 'type': 'number'},
+			'params': {
+				'type': 'object',
+				'properties': {
+					'periodValue': {
+						'type': 'number'
+					},
+					'formatValue': {
+						'type': 'number'
+					}
+				}
+			}
+		},
+		'required': [
+			'script_id',
+			'owner_id',
+			'name',
+			'time',
+			'params'
+		]
+	},
+	callback: {
+		host: 'http://localhost',
+		port: 3000,
+		url: 'http://localhost:3000'
 	}
 }
 
