@@ -1,16 +1,13 @@
 const config = {
 	mongodb: {
+		MongoUrl: 'localhost:27017/task_system',
 		dbHost: 'localhost',
 		dbPort: 27017,
 		dbName: 'task_system',
 		result_tb: 'results',
-		scratch_tb: 'scratchs',
+		scratch_tb: 'scratches',
 		task_tb: 'tasks',
-	},
-	agenda: {
-		MongoUrl: 'localhost:27017/task_system',
-		timeout: 5000,
-		definitions: ''
+		runtime_tb: 'runtimes'
 	},
 	tracks: {
 		url: 'http://localhost:3000/export_tracks',
@@ -92,6 +89,10 @@ const config = {
 		host: 'http://localhost',
 		port: 3000,
 		url: 'http://localhost:3000'
+	},
+	file: {
+		overspeed_alert: './scripts/overspeed_alert.js',
+		export_excel: './scripts/export_excel.js'
 	}
 }
 

@@ -1,5 +1,6 @@
 const _ = require('lodash')
 const moment = require('moment')
+const mongoose = require('mongoose')
 const MongoClient = require('mongodb').MongoClient
 
 const connection = async (host, port, dbname) => {
@@ -12,6 +13,10 @@ const saveTo_db = async (db, table, rs) => {
 	await db.collection(table).insertOne(rs)
 }
 
+const close_db = async (client) => {
+	await client.close()
+}
+
 const getValueByKey = async (db, table, key, task_id) => {
 	const data = await db.collection(table).findOne({ key, task_id }, { projection: { value: 1, _id: 0 }})
 	return data.value
@@ -21,16 +26,8 @@ const removeByKey = async (db, table, key, task_id) => {
 	await db.collection(table).findOneAndDelete({ key, task_id })
 }
 
-const findLatest = async (db, table) => {
-	const task = await db.collection(table).findOne({}, {
-		limit: 1,
-		sort: [['create_time', -1]],
-	})
-	return task._id
-}
-
 const findTaskById = async (db, task_id) => {
-	const task = await db.collection('tasks').findOne({ _id: task_id })
+	const task = await db.collection('tasks').findOne({ _id: mongoose.Types.ObjectId(task_id) })
 	return task
 }
 
@@ -45,8 +42,24 @@ const findScriptNameById = async (db, task) => {
 }
 
 const getFormatByTaskId = async (db, task_id) => {
-	const task = await db.collection('tasks').findOne({ _id: task_id })
+	const task = await db.collection('tasks').findOne({ _id: mongoose.Types.ObjectId(task_id) })
 	return task.params.formatValue
+}
+
+const isRuntimeExists = async (db, task) => {
+	const runtime = await db.collection('runtimes').findOne({ name: `${task._id}` })
+	if (_.size(runtime) > 0) {
+		return true
+	}
+	return false
+}
+
+const getScratchId = async (db, task_id, key) => {
+	const scratch = await db.collection('scratches').findOne({ task_id, key })
+	if (scratch) {
+		return scratch._id
+	}
+	return null
 }
 
 module.exports = {
@@ -54,9 +67,11 @@ module.exports = {
 	saveTo_db,
 	getValueByKey,
 	removeByKey,
-	findLatest,
+	close_db,
 	queryByTime,
 	findScriptNameById,
 	getFormatByTaskId,
+	isRuntimeExists,
+	getScratchId,
 	findTaskById
 }

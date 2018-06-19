@@ -1,5 +1,6 @@
 const fs = require('fs')
 const Agenda = require('agenda')
+const _ = require('lodash')
 const { NodeVM } = require('vm2')
 
 const util_mongodb = require('../engine/util/mongodb')
@@ -7,45 +8,26 @@ const config = require('../config')
 const Engine = require('../engine/index')
 
 const agenda = new Agenda({
-	db: { address: config.agenda.MongoUrl, collection: config.mongodb.runtime_tb }
+	db: { address: config.mongodb.MongoUrl, collection: config.mongodb.runtime_tb }
 })
 
-agenda.define('runtime_overspeed', { priority: 'high' }, async (job) => {
-	const script_file = fs.readFileSync('./overspeed_alert.js', { encoding: 'utf8' })
-	const engine = new Engine((job.attrs.data.task)._id)
-	const vm = new NodeVM({
-		console: 'inherit',
-		sandbox: {
-			engine,
-			task: job.attrs.data.task,
-			config
-		},
-		require: {
-			external: true,
-			builtin: ['*'],
-		}
-	})
-	const exec_result = vm.run(`${script_file}`, '../engine/index.js')
-	const event = await exec_result.onTaskExec()
-	if (event.data.length > 0) {
-		await exec_result.onTaskData(event, engine)
+const script_selector = async (task, script_name, format) => {
+	let filePath = ''
+	if (script_name === 'overspeed_alert') {
+		filePath = './overspeed_alert.js'
+	} else if (script_name === 'export_excel') {
+		filePath = './export_excel.js'
 	}
-	job.save(() => {
-		engine.log('successfully saved to database')
-	})
-})
-
-agenda.define('runtime_export', { priority: 'high' }, async (job) => {
-	const script_file = fs.readFileSync('./export_excel.js', { encoding: 'utf8' })
-	const engine = new Engine((job.attrs.data.task)._id)
+	const script_file = fs.readFileSync(filePath, { encoding: 'utf8' })
+	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+	const engine = new Engine(task._id, db)
 	const vm = new NodeVM({
 		console: 'inherit',
 		sandbox: {
 			engine,
-			format: job.attrs.data.format,
-			task: job.attrs.data.task,
-			config,
-			util_mongodb
+			util_mongodb,
+			_,
+			format
 		},
 		require: {
 			external: true,
@@ -53,41 +35,51 @@ agenda.define('runtime_export', { priority: 'high' }, async (job) => {
 		}
 	})
 	const exec_result = vm.run(`${script_file}`, '../engine/index.js')
-	await exec_result.onTaskExec()
-	job.save(() => {
-		engine.log('successfully saved to database')
-	})
-})
+	exec_result.onTaskExec()
+}
 
-agenda.define('query available task to run as runtime', { priority: 'higest' }, async (job) => {
+// agenda.define('query available task to run as runtime', { priority: 'higest' }, async (job) => {
+// 	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+// 	const task_arr = await util_mongodb.queryByTime(db, config.mongodb.task_tb)
+// 	for (let i = 0; i < task_arr.length; i += 1) {
+// 		const task = await util_mongodb.findTaskById(db, task_arr[i]._id)
+// 		const format = await util_mongodb.getFormatByTaskId(db, task._id)
+// 		const scriptNameOf_task = await util_mongodb.findScriptNameById(db, task)
+// 		await script_selector(task, scriptNameOf_task, job, format)
+// 	}
+// 	await script_selector(job.attrs.data.task, job.attrs.data.scriptNameOf_task, job, job.attrs.data.format)
+// })
+
+agenda.on('ready', async (job) => {
+	console.log('ready')
 	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
 	const task_arr = await util_mongodb.queryByTime(db, config.mongodb.task_tb)
-	for (let i = 0; i < task_arr.length; i += 1) {
-		const task = await util_mongodb.findTaskById(db, task_arr[i]._id)
-		const format = await util_mongodb.getFormatByTaskId(db, task._id)
-		const scriptNameOf_task = await util_mongodb.findScriptNameById(db, task)
-		if (scriptNameOf_task === 'overspeed_alert') {
-			agenda.now('runtime_overspeed', { task })
+	// console.log(`task_arr: ${JSON.stringify(task_arr)}`)
+	if (task_arr.length > 0) {
+		for (let i = 0; i < task_arr.length; i += 1) {
+			const task = await util_mongodb.findTaskById(db, task_arr[i]._id)
+			const format = await util_mongodb.getFormatByTaskId(db, task._id)
+			const scriptNameOf_task = await util_mongodb.findScriptNameById(db, task)
+			const isRuntime_exists = await util_mongodb.isRuntimeExists(db, task)
+			console.log(`isRuntime_exists: ${isRuntime_exists}`)
+			if (isRuntime_exists === false) {
+				const runtime = agenda.create(`${task._id}`, { task, format, scriptNameOf_task })
+				await script_selector(runtime.attrs.data.task, runtime.attrs.data.scriptNameOf_task, runtime.attrs.data.format)
+				runtime.save(() => {
+					console.log('successfully saved to database')
+				})
+				agenda.start()
+			} else {
+				agenda.stop()
+			}
 		}
-		if (scriptNameOf_task === 'export_excel') {
-			agenda.now('runtime_export', { task, format })
-		}
+	} else {
+		agenda.every('2 minutes', 'query available task to run as runtime')
 	}
 })
 
-agenda.on('ready', () => {
-	console.log('ready')
-	agenda.now('query available task to run as runtime')
-	// agenda.every('2 minutes', 'query available task to run as runtime')
-	agenda.start()
-})
-
-agenda.on('success:query available task to run as runtime', (job) => {
-	console.log('run task Successfully to: %s', JSON.stringify(job))
-})
-
-agenda.on('fail:query available task to run as runtime', (err, job) => {
-	console.log('Job failed with error: %s', err.message)
+agenda.on('complete', function(job) {
+	console.log('Job %s finished', job.attrs.name)
 })
 
 module.exports = agenda

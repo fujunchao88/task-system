@@ -4,7 +4,12 @@ const mongoose = require('mongoose')
 const Router = require('koa-router')
 const Ajv = require('ajv')
 const moment = require('moment')
+const request = require('request')
+const { NodeVM } = require('vm2')
+
 const config = require('../config')
+const Engine = require('../engine/index')
+const util_mongodb = require('../engine/util/mongodb')
 
 const ajv = new Ajv()
 const router = new Router()
@@ -12,6 +17,37 @@ const Script = mongoose.model('Script')
 const Task = mongoose.model('Task')
 const Result = mongoose.model('Result')
 const Scratch = mongoose.model('Scratch')
+
+const getSchema = (script) => {
+	let filePath = ''
+	if (script.name === 'overspeed_alert') {
+		filePath = config.file.overspeed_alert
+	} else if (script.name === 'export_excel') {
+		filePath = config.file.export_excel
+	}
+
+	// get script_schema
+	const script_file = fs.readFileSync(filePath, { encoding: 'utf8' })
+	const vm = new NodeVM({
+		console: 'inherit',
+		sandbox: {},
+		require: {
+			external: true,
+			builtin: ['*'],
+		}
+	})
+	const exec_result = vm.run(`${script_file}`, '../engine/index.js')
+	return exec_result.onParamDeclare()
+}
+
+const verifyDataSchema = (schema, req_body) => {
+	let valid = ''
+	valid = ajv.validate(schema, req_body)
+	if (!valid) {
+		throw new Error('invalid data schema')
+	}
+	return true
+}
 
 router.get('/', async (ctx, next) => {
 	ctx.body = 'hello world'
@@ -28,7 +64,7 @@ router.get('/script', async (ctx, next) => {
 			name: docs.name
 		}
 	} else {
-		docs = await Script.find({}).exec()
+		docs = await Script.find({})
 		ctx.response.body = docs
 	}
 	if (_.size(docs) === 0) {
@@ -59,16 +95,10 @@ router.post('/script', async (ctx, next) => {
 
 router.get('/script/params', async (ctx, next) => {
 	const the_script = await Script.findOne(ctx.query)
-	if (the_script.name === 'overspeed_alert') {
-		const common_param = _.mapValues(config.alert_schema.properties, o => o.type)
-		const special_param = _.mapValues(config.alert_schema.properties.params.properties, o => o.type)
-		ctx.response.body = _.assign({}, common_param, special_param)
-	}
-	if (the_script.name === 'export_excel') {
-		const common_param = _.mapValues(config.export_schema.properties, o => o.type)
-		const special_param = _.mapValues(config.export_schema.properties.params.properties, o => o.type)
-		ctx.response.body = _.assign({}, common_param, special_param)
-	}
+	const schema = getSchema(the_script)
+	const common_param = _.mapValues(schema.properties, o => o.type)
+	const special_param = _.mapValues(schema.properties.params.properties, o => o.type)
+	ctx.response.body = _.assign({}, common_param, special_param)
 	await next()
 })
 
@@ -86,7 +116,7 @@ router.get('/task', async (ctx, next) => {
 			create_time: moment(docs.create_time).format('YYYY-MM-DD HH:mm:ss')
 		}
 	} else {
-		docs = await Task.find({}).exec()
+		docs = await Task.find({})
 		ctx.response.body = docs
 	}
 	if (_.size(docs) === 0) {
@@ -97,20 +127,11 @@ router.get('/task', async (ctx, next) => {
 })
 
 router.post('/task', async (ctx, next) => {
-	let valid = ''
-	const task = new Task(ctx.request.body)
 	const script = await Script.findById(ctx.request.body.script_id)
-	if (script.name === 'overspeed_alert') {
-		valid = ajv.validate(config.alert_schema, ctx.request.body)
-	}
-	if (script.name === 'export_excel') {
-		valid = ajv.validate(config.export_schema, ctx.request.body)
-	}
-	if (!valid) {
-		throw new Error('invalid data schema')
-	}
-	const tasks = await task.save()
-	if (script && tasks) {
+	const schema = getSchema(script)
+	const is_valid = verifyDataSchema(schema, ctx.request.body)
+	const tasks = await new Task(ctx.request.body).save()
+	if (script && tasks && is_valid) {
 		ctx.response.status = 200
 		ctx.response.body = tasks._id
 	} else {
@@ -121,7 +142,20 @@ router.post('/task', async (ctx, next) => {
 })
 
 router.put('/task', async (ctx, next) => {
-
+	const script = await Script.findById(ctx.request.body.script_id)
+	const schema = getSchema(script)
+	const is_valid = verifyDataSchema(schema, ctx.request.body)
+	if (is_valid && script) {
+		const task = await Task.findByIdAndUpdate(ctx.request.body.id, { $set: ctx.request.body }, { new: true })
+		if (task) {
+			ctx.response.status = 200
+			ctx.response.body = task
+		} else {
+			ctx.response.status = 400
+			ctx.response.body = 'failed to update task'
+		}
+	}
+	await next()
 })
 
 router.get('/result', async (ctx, next) => {
@@ -136,7 +170,7 @@ router.get('/result', async (ctx, next) => {
 			create_time: moment(docs.create_time).format('YYYY-MM-DD HH:mm:ss')
 		}
 	} else {
-		docs = await Result.find({}).exec()
+		docs = await Result.find({})
 		ctx.response.body = docs
 	}
 	if (_.size(docs) === 0) {
@@ -147,30 +181,80 @@ router.get('/result', async (ctx, next) => {
 })
 
 // 超速告警订阅接口
-router.get('/subcribe/overspeed', async (ctx, next) => {
-	const rs = [
-		{
-			vehicle_ids: `car_${Math.floor(Math.random() * 1000)}`,
-			speed: Math.floor(Math.random() * 200),
-			position: {
-				lng: Math.random() * 180,
-				lat: Math.random() * 90,
-				address: '广东省珠海市香洲区南方软件园',
-				location_time: Date.now()
-			}
+router.post('/subcribe', async (ctx, next) => {
+	const data = simulate_data(ctx.request.body.task_id)
+	ctx.response.body = data
+	await next()
+})
+
+const simulate_data = (task_id) => {
+	setTimeout(simulate_data, 2000, task_id)
+	const rs = {
+		vehicle_ids: 'car_1',
+		speed: 130,
+		position: {
+			lng: Math.random() * 180,
+			lat: Math.random() * 90,
+			address: '广东省珠海市香洲区南方软件园',
+			location_time: Date.now()
+		}
+	}
+	const options = {
+		url: 'http://localhost:3000/callback/overspeed',
+		method: 'POST',
+		body: {
+			data: rs,
+			task_id,
+			cb_key: 'overspeed'
 		},
-		{
-			vehicle_ids: `car_${Math.floor(Math.random() * 1000)}`,
-			speed: Math.floor(Math.random() * 200),
-			position: {
-				lng: Math.random() * 180,
-				lat: Math.random() * 90,
-				address: '广东省珠海市香洲区东岸社区',
-				location_time: Date.now()
+		json: true,
+		resolveWithFullResponse: true
+	}
+	request(options, (err, res, body) => {
+		if (err) {
+			console.error(err)
+		}
+		if (res.statusCode === 200) {
+			return body
+		} else {
+			return {
+				statusCode: res.statusCode,
+				message: res.statusMessage
 			}
 		}
-	]
-	ctx.response.body = rs
+	})
+	return rs
+}
+
+router.post('/callback/overspeed', async (ctx ,next) => {
+	const script_file = fs.readFileSync('./scripts/overspeed_alert.js', { encoding: 'utf8' })
+	const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
+	const engine = new Engine(ctx.request.body.task_id, db)
+	const vm = new NodeVM({
+		console: 'inherit',
+		sandbox: {
+			engine,
+			_,
+			util_mongodb
+		},
+		require: {
+			external: true,
+			builtin: ['*'],
+		}
+	})
+	const exec_result = vm.run(`${script_file}`, './engine/index.js')
+	exec_result.onTaskData(ctx.request.body.data, ctx.request.body.cb_key)
+	ctx.response.body = 'Completed subscribe data'
+	await next()
+})
+
+router.post('/alert/overspeed', async (ctx ,next) => {
+	ctx.response.body = 'test passed'
+	await next()
+})
+
+router.post('/alert/long_stay', async (ctx ,next) => {
+	ctx.response.body = 'test passed'
 	await next()
 })
 
@@ -189,16 +273,6 @@ router.get('/export_millege', async (ctx, next) => {
 		{ vehicle_ids: 'car_two', timestamp: Date.now(), lng: Math.random() * 180, lat: Math.random() * 90 },
 	]
 	ctx.response.body = rs
-	await next()
-})
-
-router.post('/alert/overspeed', async (ctx ,next) => {
-	ctx.response.body = 'test passed'
-	await next()
-})
-
-router.post('/alert/long_stay', async (ctx ,next) => {
-	ctx.response.body = 'test passed'
 	await next()
 })
 

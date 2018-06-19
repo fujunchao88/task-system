@@ -1,11 +1,11 @@
 const fs = require('fs')
 const _ = require('lodash')
+const request = require('request')
 const rp = require('request-promise')
 const moment = require('moment')
 const Excel = require('exceljs')
 const jsb = require('json-schema-builder')
 const OSS = require('ali-oss').Wrapper
-
 const config = require('../config')
 const util_mongodb = require('./util/mongodb/index')
 
@@ -28,8 +28,9 @@ const callback_type = new Map([
 ])
 
 class Engine {
-	constructor(task_id) {
+	constructor(task_id, db) {
 		this.task_id = task_id
+		this.db = db
 	}
 
 	paramDeclare(name, type) {
@@ -65,7 +66,6 @@ class Engine {
 		const options = {
 			url: key === 'tracks' ? config.tracks.url : config.millege.url,
 			method: 'GET',
-			// qs: key === 'tracks' ? config.tracks.params : config.millege.params,
 			json: true,
 			resolveWithFullResponse: true,
 		}
@@ -79,7 +79,6 @@ class Engine {
 	// 	{ vehicle_ids: 'oi3jo1123', timestamp: 44878, lat: 111.66, lng: 55.44 }
 	// ]
 	async save(key, content, format) {
-		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
 		let data
 		if (format === 0) {
 			const now_str = moment().format('YYYYMMDD_HHmmss')
@@ -98,63 +97,68 @@ class Engine {
 		}
 		const rs = {
 			type: format,
-			// type: result_type.get(format),
 			data,
 			create_time: Date.now(),
 			task_id: this.task_id
 		}
-		await util_mongodb.saveTo_db(db, config.mongodb.result_tb, rs)
-		db.emit('close')
+		await util_mongodb.saveTo_db(this.db, config.mongodb.result_tb, rs)
 	}
 
-	async subscribe(key, ...params) { // query为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
-		// setTimeout(async () => {
+	subscribe(key, ...params) { // key为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
 		const options = {
-			url: 'http://localhost:3000/subcribe/overspeed',
-			method: 'GET',
+			url: 'http://localhost:3000/subcribe',
+			method: 'POST',
+			body: {
+				task_id: this.task_id,
+				key,
+				params
+			},
 			json: true,
 			resolveWithFullResponse: true
 		}
-		const result = await rp(options)
-		return result.body
-		// }, 5000)
+		request(options, (err, res, body) => {
+			if (err) {
+				console.error(err)
+			}
+			if (res.statusCode === 200) {
+				console.log(`subscribe body: ${JSON.stringify(body)}`)
+				return body
+			} else {
+				return {
+					statusCode: res.statusCode,
+					message: res.statusMessage
+				}
+			}
+		})
 	}
 
 	async set(key, value) {
-		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
 		const rs = {
 			task_id: this.task_id,
 			key,
 			value
 		}
-		util_mongodb.saveTo_db(db, config.mongodb.scratch_tb, rs)
-		db.emit('close')
+		await util_mongodb.saveTo_db(this.db, config.mongodb.scratch_tb, rs)
 	}
 
 	async get(key) {
-		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
-		util_mongodb.getValueByKey(db, config.mongodb.scratch_tb, key, this.task_id)
-		db.emit('close')
+		await util_mongodb.getValueByKey(this.db, config.mongodb.scratch_tb, key, this.task_id)
 	}
 
 	async append(key, data) {
-		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
-		const value = await util_mongodb.getValueByKey(db, config.mongodb.result_tb, key, this.task_id)
-		await db.collection(config.mongodb.scratch_tb).findOneAndUpdate({ key, task_id: this.task_id }, { $set: {value: data + value }})
-		db.emit('close')
+		const value = await util_mongodb.getValueByKey(this.db, config.mongodb.scratch_tb, key, this.task_id)
+		await this.db.collection(config.mongodb.scratch_tb).findOneAndUpdate({ key, task_id: this.task_id }, { $set: {value: data + value }})
 	}
 
 	async del(key) {
-		const db = await util_mongodb.connection(config.mongodb.dbHost, config.mongodb.dbPort, config.mongodb.dbName)
-		await util_mongodb.removeByKey(db ,config.mongodb.scratch_tb, key, this.task_id)
-		db.emit('close')
+		await util_mongodb.removeByKey(this.db ,config.mongodb.scratch_tb, key, this.task_id)
 	}
 
 	log(...args) {
 		console.log(args)
 	}
 
-	async callback(cb_key, data) {
+	callback(data, cb_key) { // rs已经是超过阈值的数据
 		const options = {
 			url: `${config.callback.url}${callback_type.get(cb_key)}`,
 			method: 'POST',
@@ -166,8 +170,20 @@ class Engine {
 				data
 			}
 		}
-		const result = await rp(options)
-		return result.body
+		request(options, function(err, res, body) {
+			if (err) {
+				console.error(err)
+			}
+			if (res.statusCode === 200) {
+				console.log(`callback body: ${JSON.stringify(body)}`)
+				return body
+			} else {
+				return {
+					statusCode: res.statusCode,
+					message: res.statusMessage
+				}
+			}
+		})
 	}
 }
 

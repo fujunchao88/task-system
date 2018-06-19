@@ -13,19 +13,29 @@ mongoose.connect('mongodb://localhost/task_system', function(err, db) {
 
 require('./models/Scripts')
 require('./models/Tasks')
-require('./models/Scratchs')
+require('./models/Scratches')
 require('./models/Results')
 
 const router = require('./routes/index')
 const app = new Koa()
 
+app.on('error', function (err) {
+	console.log('index error: ', err.message)
+	console.error(err)
+})
+
 app.use(logger())
-app.use(async (ctx, next) => next()
-	.catch(err => {
-		ctx.body = String(err)
-		ctx.status = err.status || 500
-	})
-)
+app.use(async (ctx, next) => {
+	try {
+		await next()
+	} catch (err) {
+		ctx.response.status = err.statusCode || err.status || 500
+		ctx.response.body = {
+			message: err.message
+		}
+		ctx.app.emit('error', err, ctx)
+	}
+})
 app.use(bodyParser({
 	onerror(error, ctx) {
 		ctx.throw(400, `cannot parse request body, ${JSON.stringify(error)}`)
