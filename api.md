@@ -129,14 +129,14 @@
 | 参数名       |  类型  | 描述                                                         | 默认值 | 是否必填 |
 | :---------- | :----: | :----------------------------------------------------------- | :----: | :------: |
 | format_value    | number | 导出文件类型（0 csv、1 spreadsheet、2 pdf）                |   ""   |   Yes    |
-| period_value    | number | 时间周期类型（0 everyday、1 everyhour、2 everyweek、3 everymonth）         |   ""   |   Yes    |
+| period_value    | number | 时间周期类型（0 everyhour、1 everyday、2 everyweek、3 everymonth）         |   ""   |   Yes    |
 
 #### 车辆离线告警
 
 | 参数名       |  类型  | 描述                                                         | 默认值 | 是否必填 |
 | :---------- | :----: | :----------------------------------------------------------- | :----: | :------: |
 | offline_interval     | number | 车辆离线时间（单位s）                                |   ""   |   Yes    |
-| period_value     | number | 时间周期类型（0 everyday、1 everyhour、2 everyweek、3 everymonth）     |   ""   |   Yes    |
+| period_value     | number | 时间周期类型（0 everyhour、1 everyday、2 everyweek、3 everymonth）     |   ""   |   Yes    |
 
 Example:
 ```json
