@@ -1,6 +1,6 @@
 ## 协议规范
 
-- 所有的时间戳均采用**timestamp** 表示,精确到毫秒 
+- 所有的时间戳均采用**timestamp** 表示,精确到秒 
 - 如果相关字段为空,提供相应的缺省值。比如一个类型为`string`的字段为 空, 提供`""`; 一个类型为`number`的字段为空, 提供 0
 - 所有参数一律小写
 - 所有接口名称一律小写，多个语义单词用下划线分隔，如`custom_profile`
@@ -44,9 +44,20 @@
 | owner_id    | string | 三元组id                                               |   ""   |   Yes    |
 | name    | string | 任务名称                                                   |   ""   |   Yes    |
 | params    | object | 该模板所需的任务参数，不同告警类型不同                      |   ""   |   Yes    |
-| time    | number | 任务执行时间（毫秒）                                         |   ""   |   Yes    |
+| time    | number | 任务执行时间（timestamp,单位秒）                                         |   ""   |   Yes    |
 
 #### 参数说明
+
+- vehicles: 由一个object组成的数组，object包含 type以及id_list两个属性，其中type有 vehicle_list以及apartment_list两种类型，id_list为车辆ID组成的字符串，以逗号分隔。
+示例如下：
+```json
+"vehicles": [
+    {
+      "type": "vehicle_list",
+      "id_list": "0,1"
+    }
+ ]
+```
 
 - owner_id: 由 组织-部门-用户 这一架构关联的id，主要用于查询任务时获取当前owner下的所有任务。（如：要获取 DBJ-软件部-李某 创建过的所有任务，此时owner_id为aaa123;
 若要获取 DBJ-李某 创建过的所有任务，李某可能在硬件部下也创建过任务，此时只需查询组织DBJ下用户李某创建的任务，此时的owner_id可以是bbb456）
@@ -128,8 +139,13 @@
 
 | 参数名       |  类型  | 描述                                                         | 默认值 | 是否必填 |
 | :---------- | :----: | :----------------------------------------------------------- | :----: | :------: |
+| data_type    | string | 所需数据类型（mileage、 tracks、 status）                     |   ""   |   Yes    |
+| time_type    | string | 聚合时间类型（当data_type=mileage时需要。有hour, day, month, year四种类型）  |   ""   |   No    |
 | format_value    | number | 导出文件类型（0 csv、1 spreadsheet、2 pdf）                |   ""   |   Yes    |
 | period_value    | number | 时间周期类型（0 everyhour、1 everyday、2 everyweek、3 everymonth）         |   ""   |   Yes    |
+| start_time    | number | 开始时间 （timestamp，单位秒）        			      |   ""   |   Yes    |
+| end_time      | number | 结束时间  （timestamp，单位秒）                                |   ""   |   Yes    |
+
 
 #### 车辆离线告警
 
