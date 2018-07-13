@@ -17,8 +17,8 @@ const close_db = async (client) => {
 	await client.close()
 }
 
-const getValueByKey = async (db, table, key, task_id) => {
-	const data = await db.collection(table).findOne({ key, task_id }, { projection: { value: 1, _id: 0 }})
+const getValueByKey = async (db, task_id, key) => {
+	const data = await db.collection('scratches').findOne({ task_id, key }, { projection: { value: 1, _id: 0 }})
 	return data.value
 }
 
@@ -31,8 +31,8 @@ const findTaskById = async (db, task_id) => {
 	return task
 }
 
-const queryByTime = async (db, table) => {
-	const arr = await db.collection(table).find({ time: { $lte: moment().unix() } }, { projection: { _id: 1, name: 1 }}).toArray()
+const queryByTime = async (db) => {
+	const arr = await db.collection('tasks').find({ time: { $lte: moment().unix() } }, { projection: { _id: 1, name: 1 }}).toArray()
 	return arr
 }
 
@@ -54,12 +54,17 @@ const isRuntimeExists = async (db, task) => {
 	return false
 }
 
+const removeRuntimeByTaskId = async (db, task_id) => {
+	await db.collection('runtimes').deleteOne({ name: `${task_id}` })
+}
+
 const getScratchId = async (db, task_id, key) => {
 	const scratch = await db.collection('scratches').findOne({ task_id, key })
-	if (scratch) {
-		return scratch._id
-	}
-	return null
+	return scratch
+}
+
+const updateScratch = async (db, task_id, key, value) => {
+	await db.collection('scratches').updateOne({ task_id, key }, { $set: { value }})
 }
 
 module.exports = {
@@ -73,5 +78,7 @@ module.exports = {
 	getFormatByTaskId,
 	isRuntimeExists,
 	getScratchId,
-	findTaskById
+	findTaskById,
+	updateScratch,
+	removeRuntimeByTaskId
 }

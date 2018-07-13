@@ -5,9 +5,10 @@ const TaskSchema = new mongoose.Schema({
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'Script'
 	},
+	vehicles: Array,
 	owner_id: String,
 	name: String,
-	time: Date,
+	time: Number,
 	params: Object
 }, {
 	timestamps: { 

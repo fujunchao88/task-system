@@ -16,16 +16,6 @@ const client = new OSS({
 	accessKeySecret: config.oss.options.accessKeySecret,
 	bucket: config.oss.options.bucket
 })
-// const result_type = new Map([
-// 	['csv', 0],
-// 	['excel', 1],
-// 	['pdf', 2],
-// 	['raw', 3]
-// ])
-const callback_type = new Map([
-	['overspeed', '/alert/overspeed'],
-	['long_stay', '/alert/long_stay']
-])
 
 class Engine {
 	constructor(task_id, db) {
@@ -62,13 +52,46 @@ class Engine {
 		return this.name = name
 	}
 
-	async queryTable(key) {
+	async queryTable(params, vehicle_id_list, time_type) {
 		const options = {
-			url: key === 'tracks' ? config.tracks.url : config.millege.url,
 			method: 'GET',
 			json: true,
 			resolveWithFullResponse: true,
+			useQuerystring: true,
 		}
+		if (params.data_type === 'tracks') {
+			options.url = `${config.business_server.gateway}${config.business_server.tracks}`
+			options.qs = {
+				vehicle_id: vehicle_id_list
+			}
+		}
+		if (params.data_type === 'mileage') {
+			options.url = `${config.business_server.gateway}${config.business_server.mileage}`
+			options.qs = {
+				vehicle_id_list,
+				type: time_type,
+			}
+			if (time_type === 'hour') {
+				options.qs.start = moment(params.start_time * 1000).format('YYYYMMDDHH')
+				options.qs.end = moment(params.end_time * 1000).format('YYYYMMDDHH')
+			} else if (time_type === 'day') {
+				options.qs.start = moment(params.start_time * 1000).format('YYYYMMDD')
+				options.qs.end = moment(params.end_time * 1000).format('YYYYMMDD')
+			} else if (time_type === 'month') {
+				options.qs.start = moment(params.start_time * 1000).format('YYYYMM')
+				options.qs.end = moment(params.end_time * 1000).format('YYYYMM')
+			} else {
+				options.qs.start = moment(params.start_time * 1000).format('YYYY')
+				options.qs.end = moment(params.end_time * 1000).format('YYYY')
+			}
+		}
+		if (params.data_type === 'status') {
+			options.url = `${config.business_server.gateway}${config.business_server.status}`
+			options.qs = {
+				vehicle_id: vehicle_id_list
+			}
+		}
+		console.log(`options: ${JSON.stringify(options)}`)
 		const { body } = await rp(options)
 		return body
 	}
@@ -101,17 +124,20 @@ class Engine {
 			create_time: Date.now(),
 			task_id: this.task_id
 		}
-		await util_mongodb.saveTo_db(this.db, config.mongodb.result_tb, rs)
+		await util_mongodb.saveTo_db(this.db, 'results', rs)
 	}
 
-	subscribe(key, ...params) { // key为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
+	subscribe(vehicle_id_list, type, key, params) { // key为任务所需参数，params实际为任务所需参数的值，如：超速告警中判断是否超速的临界值
 		const options = {
-			url: 'http://localhost:3000/subcribe',
+			url: `${config.business_server.gateway}/vehicle/subscription`,
 			method: 'POST',
 			body: {
 				task_id: this.task_id,
-				key,
-				params
+				vehicle_id_list,
+				type,
+				callback_url: config.business_server.callback_url,
+				// key,
+				// params
 			},
 			json: true,
 			resolveWithFullResponse: true
@@ -121,7 +147,7 @@ class Engine {
 				console.error(err)
 			}
 			if (res.statusCode === 200) {
-				console.log(`subscribe body: ${JSON.stringify(body)}`)
+				console.log(`subscription body: ${JSON.stringify(body)}`)
 				return body
 			} else {
 				return {
@@ -132,42 +158,123 @@ class Engine {
 		})
 	}
 
+	async unsubscribe(sub_id) {
+		const options = {
+			url: `${config.business_server.gateway}/unsubscription`,
+			method: 'POST',
+			body: {
+				task_id: this.task_id,
+				sub_id
+			},
+			json: true,
+			resolveWithFullResponse: true
+		}
+		const { statusCode, statusMessage, body } = await rp(options)
+		if (statusCode === 200 && body) {
+			console.log('subscription was cancled')
+			return body
+		} else {
+			return {
+				statusCode,
+				statusMessage,
+				body
+			}
+		}
+	}
+
 	async set(key, value) {
 		const rs = {
 			task_id: this.task_id,
 			key,
 			value
 		}
-		await util_mongodb.saveTo_db(this.db, config.mongodb.scratch_tb, rs)
+		await util_mongodb.saveTo_db(this.db, 'scratches', rs)
 	}
 
 	async get(key) {
-		await util_mongodb.getValueByKey(this.db, config.mongodb.scratch_tb, key, this.task_id)
+		await util_mongodb.getValueByKey(this.db, this.task_id, key)
 	}
 
 	async append(key, data) {
-		const value = await util_mongodb.getValueByKey(this.db, config.mongodb.scratch_tb, key, this.task_id)
-		await this.db.collection(config.mongodb.scratch_tb).findOneAndUpdate({ key, task_id: this.task_id }, { $set: {value: data + value }})
+		const value = await util_mongodb.getValueByKey(this.db, 'scratches', key, this.task_id)
+		await this.db.collection('scratches').findOneAndUpdate({ key, task_id: this.task_id }, { $set: {value: data + value }})
+	}
+
+	async update(key, value) {
+		await util_mongodb.updateScratch(this.db, this.task_id, key, value)
 	}
 
 	async del(key) {
-		await util_mongodb.removeByKey(this.db ,config.mongodb.scratch_tb, key, this.task_id)
+		await util_mongodb.removeByKey(this.db, 'scratches', key, this.task_id)
 	}
 
 	log(...args) {
 		console.log(args)
 	}
 
-	callback(data, cb_key) { // rs已经是超过阈值的数据
+	async getScratch(key) {
+		const scratch = await util_mongodb.getScratchId(this.db, this.task_id, key)
+		if (scratch) {
+			return scratch._id
+		}
+		return null
+	}
+
+	async removeRuntimeByTaskId() {
+		await util_mongodb.removeRuntimeByTaskId(this.db, this.task_id)
+	}
+
+	async callback(data) {
+		const task = await util_mongodb.findTaskById(this.db, this.task_id)
+		const script_name = await util_mongodb.findScriptNameById(this.db, task)
 		const options = {
-			url: `${config.callback.url}${callback_type.get(cb_key)}`,
+			url: `${config.myserver.gateway}/callback/alert-event`,
 			method: 'POST',
 			json: true,
 			resolveWithFullResponse: true,
-			body: {
-				status: 200,
-				message: 'Operation is successful',
-				data
+		}
+		if (script_name === 'overspeed_alert') {
+			options.body = {
+				task_id: this.task_id,
+				vehicle_id: data.vehicle_id,
+				speed: data.vehicle_speed,
+				timestamp: data.timestamp,
+				location: {
+					lng: data.longitude,
+					lat: data.latitude
+				},
+				extra: data.extra ? data.extra : {}
+			}
+		}
+		if (script_name === 'fence_alert') {
+			options.body = {
+				task_id: this.task_id,
+				vehicle_id: data.vehicle_id,
+				type: data.type,
+				timestamp: data.timestamp,
+				location: {
+					lng: data.longitude,
+					lat: data.latitude
+				},
+				extra: data.extra ? data.extra : {}
+			}
+		}
+		if (script_name === 'lowVoltage_alert') {
+			options.body = {
+				task_id: this.task_id,
+				vehicle_id: data.vehicle_id,
+				voltage: data.battery_voltage,
+				timestamp: data.timestamp,
+				extra: data.extra ? data.extra : {}
+			}
+		}
+		if (script_name === 'maintenance_alert') {
+			options.body = {
+				task_id: this.task_id,
+				vehicle_id: data.vehicle_id,
+				type: data.type,
+				timestamp: data.timestamp,
+				extra: data.extra ? data.extra : {}
 			}
 		}
 		request(options, function(err, res, body) {

@@ -21,9 +21,15 @@ const schema = {
 		'params': {
 			'type': 'object',
 			'properties': {
-				'speed': {
+				'radius': {
 					'type': 'number'
 				},
+				'lng': {
+					'type': 'number'
+				},
+				'lat': {
+					'type': 'number'
+				}
 			}
 		}
 	},
@@ -41,16 +47,27 @@ function onParamDeclare() {
 	return schema
 }
 
+const getDistance = async ( lng1, lat1, lng2, lat2) => {
+	const radLat1 = lat1 * Math.PI / 180
+	const radLat2 = lat2 * Math.PI / 180
+	const a = radLat1 - radLat2
+	const  b = lng1 * Math.PI / 180 - lng2 * Math.PI / 180
+	let s = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin(a/2),2) + Math.cos(radLat1) * Math.cos(radLat2) * Math.pow(Math.sin(b/2),2)))
+	s = s * 6378.137 // EARTH_RADIUS
+	s = Math.round(s * 10000) / 10000
+	return s
+}
+
 // 指定任务逻辑
 const onTaskExec = async () => {
-	setTimeout(onTaskExec, 15000)
-	engine.log('Overspeed_alert: in TaskExec')
+	setTimeout(onTaskExec, 2000)
+	engine.log('fence_alert: in TaskExec')
 	let list = null
 	if (task.vehicles[0].type === 'vehicle_list') {
 		list = _.split(task.vehicles[0].id_list, ',')
 	}
 	const options = {
-		url: `${config.business_server.gateway}/vehicle/location/latest`,
+		url: `${config.business_server.gateway}/vehicle/location`,
 		method: 'GET',
 		qs: {
 			vehicle_id: list,
@@ -64,16 +81,29 @@ const onTaskExec = async () => {
 			console.error(err)
 		}
 		if (res.statusCode === 200) {
-			console.log(`subscription body: ${JSON.stringify(body)}`)
-			if (_.size(body) > 0) {
-				const scratch_id = await engine.getScratch(body.vehicle_id)
-				if (body.vehicle_speed > task.params.speed) {
-					if (_.size(scratch_id) > 0) {
-						await engine.append(body.vehicle_id, 1)
-					} else {
-						await engine.set(body.vehicle_id, 1)
+			// console.log(`subscription body: ${JSON.stringify(body)}`)
+			for (let ele of body) {
+				ele.type = undefined
+				if (ele.longitude && ele.latitude) {
+					const distance = await getDistance(task.params.lng, task.params.lat, ele.longitude, ele.latitude)
+					const scratch_id = await engine.getScratch(ele.vehicle_id)
+					if (distance * 1000 <= task.params.radius) {
+						engine.log(`distance: ${distance * 1000}`)
+						if (scratch_id === null) {
+							ele.type = 1
+							await engine.set(ele.vehicle_id, ele.type)
+						} else {
+							const scratch_value = await engine.get(ele.vehicle_id)
+							if (scratch_value === 1) {
+								ele.type = 2
+							} else {
+								ele.type = 1
+							}
+							await engine.update(ele.vehicle_id, ele.type)
+						}
+						engine.log(`ele: ${JSON.stringify(ele)}`)
+						await engine.callback(ele)
 					}
-					engine.callback(body, engine.db, engine.task_id)
 				}
 			}
 		} else {
@@ -91,31 +121,6 @@ const onTaskExec = async () => {
 const onTaskData = async (data, task_id) => {
 	engine.log('Overspeed_alert:in TaskData')
 	engine.log(`data: ${JSON.stringify(data)}`)
-	if (_.size(data) > 0) {
-		const scratch_id = await engine.getScratchId(data.vehicle_id)
-		if (scratch_id !== null) {
-			await engine.append(data.vehicle_id, 1)
-		} else {
-			await engine.set(data.vehicle_id, 1)
-		}
-	}
-	const cb = engine.callback(data, task_id)
-	if (cb && task === null) {
-		const rs = await engine.unsubscribe(data.sub_id)
-		const result = await engine.removeRuntimeByTaskId()
-		if (rs.statusCode === 200 && result !== null) {
-			engine.log('task was deleted and subscription was cancled')
-		}
-	} else {
-		const duration_time = Date.now() - task.time
-		if (duration_time >= 12 * 3600 * 1000) {
-			const rs = await engine.unsubscribe(data.sub_id)
-			const result = await engine.removeRuntimeByTaskId()
-			if (rs.statusCode === 200 && result !== null) {
-				engine.log('the existence of runtime exceed due duration_time, it will be recreated later')
-			}
-		}
-	}
 }
 
 module.exports = {
